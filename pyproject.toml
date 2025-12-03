@@ -1,14 +1,18 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = [
+    "setuptools>=61.0",
+    "wheel",
+]
+build_backend = "setuptools.build_meta"
 
 [project]
 name = "dequedict"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast ordered dict with deque-like operations at both ends"
 readme = "README.md"
+requires_python = ">=3.9"
 license = "MIT"
-requires-python = ">=3.9"
+authors = [{name = "sebastian"}]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -20,25 +24,86 @@ classifiers = [
     "Programming Language :: C",
     "Operating System :: OS Independent",
 ]
-dependencies = ["typing_extensions>=4.0"]
+dependencies = [
+    "typing_extensions>=4.0",
+]
 
-[[project.authors]]
-name = "sebastian"
-
-[project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-benchmark"]
+[project.optional_dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-benchmark",
+]
 
 [tool.setuptools]
-packages = ["dequedict"]
+packages = [
+    "dequedict",
+]
 
 [tool.setuptools.package-data]
-dequedict = ["*.pyi", "py.typed"]
+dequedict = [
+    "*.pyi",
+    "py.typed",
+]
 
 [tool.ruff]
 line-length = 120
-select = ["A", "COM812", "C4", "D", "E", "F", "UP", "B", "SIM", "N", "ANN", "ASYNC", "S", "T20", "RET", "SIM", "ARG", "PTH", "ERA", "PD", "I", "PLW"]
-ignore = ["D105", "PGH004", "D100", "D101", "D104", "D106", "ANN003", "ANN204", "UP009", "B026", "ANN001", "ANN401", "ANN202", "D107", "D102", "D103", "E731", "UP006", "UP035", "ANN002", "ANN201", "N805", "N806", "N803", "N804", "N802", "N801", "N807"]
-fixable = ["ALL"]
+select = [
+    "A",
+    "COM812",
+    "C4",
+    "D",
+    "E",
+    "F",
+    "UP",
+    "B",
+    "SIM",
+    "N",
+    "ANN",
+    "ASYNC",
+    "S",
+    "T20",
+    "RET",
+    "SIM",
+    "ARG",
+    "PTH",
+    "ERA",
+    "PD",
+    "I",
+    "PLW",
+]
+ignore = [
+    "D105",
+    "PGH004",
+    "D100",
+    "D101",
+    "D104",
+    "D106",
+    "ANN003",
+    "ANN204",
+    "UP009",
+    "B026",
+    "ANN001",
+    "ANN401",
+    "ANN202",
+    "D107",
+    "D102",
+    "D103",
+    "E731",
+    "UP006",
+    "UP035",
+    "ANN002",
+    "ANN201",
+    "N805",
+    "N806",
+    "N803",
+    "N804",
+    "N802",
+    "N801",
+    "N807",
+]
+fixable = [
+    "ALL",
+]
 unfixable = []
 
 [tool.ruff.format]
@@ -52,9 +117,17 @@ line-ending = "auto"
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"**/{tests,docs}/*" = ["ALL"]
-"**__init__.py" = ["F401"]
+"**/{tests,docs}/*" = [
+    "ALL",
+]
+"**__init__.py" = [
+    "F401",
+]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+]
 addopts = "-v"
+
+[dependency-groups]
