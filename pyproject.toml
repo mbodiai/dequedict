@@ -3,7 +3,7 @@ requires = [
     "setuptools>=68.0",
     "wheel",
 ]
-build_backend = "setuptools.build_meta"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "dequedict"
