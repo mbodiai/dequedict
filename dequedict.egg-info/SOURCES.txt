@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+setup.py
+dequedict/__init__.py
+dequedict/_dequedict.c
+dequedict/_dequedict.pyi
+dequedict/py.typed
+dequedict.egg-info/PKG-INFO
+dequedict.egg-info/SOURCES.txt
+dequedict.egg-info/dependency_links.txt
+dequedict.egg-info/requires.txt
+dequedict.egg-info/top_level.txt
+tests/test_dequedict.py

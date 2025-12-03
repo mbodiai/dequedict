@@ -1,0 +1,5 @@
+typing_extensions>=4.0
+
+[dev]
+pytest>=7.0
+pytest-benchmark
