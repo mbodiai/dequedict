@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import types
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from typing import TYPE_CHECKING, Callable, Generic, ItemsView, Iterator, KeysView, TypeVar, ValuesView, overload
@@ -27,24 +28,31 @@ class DequeDict(Mapping[K, V]):
     - O(1) pop/popitem/peek/peekitem
     - O(1) appendleft
     - O(1) move_to_end
+    - O(1) at(index) — amortized via incremental cache
     """
 
-    __slots__ = ("_dict", "_head", "_tail")
+    __slots__ = ("_dict", "_head", "_tail", "_cache", "_cache_offset")
     __hash__ = None  # type: ignore[assignment]
 
+    def __class_getitem__(cls, params: object) -> types.GenericAlias:
+        return types.GenericAlias(cls, params)
+
     class _Node:
-        __slots__ = ("key", "value", "prev", "next")
+        __slots__ = ("key", "value", "prev", "next", "cache_idx")
 
         def __init__(self, key: K, value: V) -> None:
             self.key = key
             self.value = value
             self.prev: DequeDict._Node | None = None
             self.next: DequeDict._Node | None = None
+            self.cache_idx: int = -1
 
     def __init__(self, items: Mapping[K, V] | Iterable[tuple[K, V]] | None = None) -> None:
         self._dict: dict[K, DequeDict._Node] = {}
         self._head: DequeDict._Node | None = None
         self._tail: DequeDict._Node | None = None
+        self._cache: list[V] | None = None
+        self._cache_offset: int = 0
         if items is not None:
             if _is_iterable_of_pairs(items):
                 for k, v in items:
@@ -52,6 +60,23 @@ class DequeDict(Mapping[K, V]):
             else:
                 for k, v in items.items():
                     self[k] = v
+
+    def _invalidate_cache(self) -> None:
+        self._cache = None
+        self._cache_offset = 0
+
+    def _build_cache(self) -> list[_Node]:
+        cache: list[DequeDict._Node] = []
+        node = self._head
+        i = 0
+        while node:
+            node.cache_idx = i
+            cache.append(node)
+            node = node.next
+            i += 1
+        self._cache = cache
+        self._cache_offset = 0
+        return cache
 
     def __len__(self) -> int:
         return len(self._dict)
@@ -66,10 +91,14 @@ class DequeDict(Mapping[K, V]):
 
     def __setitem__(self, key: K, value: V) -> None:
         if key in self._dict:
-            self._dict[key].value = value
+            node = self._dict[key]
+            node.value = value
             return
         node = self._Node(key, value)
         self._dict[key] = node
+        if self._cache is not None:
+            node.cache_idx = len(self._cache)
+            self._cache.append(node)
         if self._tail is None:
             self._head = self._tail = node
         else:
@@ -82,6 +111,7 @@ class DequeDict(Mapping[K, V]):
             raise KeyError(key)
         node = self._dict.pop(key)
         self._unlink(node)
+        self._invalidate_cache()
 
     def _unlink(self, node: _Node) -> None:
         if node.prev:
@@ -161,6 +191,8 @@ class DequeDict(Mapping[K, V]):
         node = self._head
         del self._dict[node.key]
         self._unlink(node)
+        if self._cache is not None:
+            self._cache_offset += 1
         return node.value
 
     def popleftitem(self) -> tuple[K, V]:
@@ -170,6 +202,8 @@ class DequeDict(Mapping[K, V]):
         node = self._head
         del self._dict[node.key]
         self._unlink(node)
+        if self._cache is not None:
+            self._cache_offset += 1
         return (node.key, node.value)
 
     @overload
@@ -189,6 +223,8 @@ class DequeDict(Mapping[K, V]):
             node = self._tail
             del self._dict[node.key]
             self._unlink(node)
+            if self._cache is not None:
+                self._cache.pop()
             return node.value
         if key not in self._dict:
             if default is not None:
@@ -196,6 +232,7 @@ class DequeDict(Mapping[K, V]):
             raise KeyError(key)
         node = self._dict.pop(key)
         self._unlink(node)
+        self._invalidate_cache()
         return node.value
 
     def popitem(self) -> tuple[K, V]:
@@ -205,6 +242,8 @@ class DequeDict(Mapping[K, V]):
         node = self._tail
         del self._dict[node.key]
         self._unlink(node)
+        if self._cache is not None:
+            self._cache.pop()
         return (node.key, node.value)
 
     def appendleft(self, key: K, value: V) -> None:
@@ -213,6 +252,7 @@ class DequeDict(Mapping[K, V]):
             raise KeyError("key already exists")
         node = self._Node(key, value)
         self._dict[key] = node
+        self._invalidate_cache()
         if self._head is None:
             self._head = self._tail = node
         else:
@@ -228,6 +268,7 @@ class DequeDict(Mapping[K, V]):
         if (last and node is self._tail) or (not last and node is self._head):
             return
         self._unlink(node)
+        self._invalidate_cache()
         if last:
             node.prev = self._tail
             node.next = None
@@ -268,6 +309,7 @@ class DequeDict(Mapping[K, V]):
         self._dict.clear()
         self._head = None
         self._tail = None
+        self._invalidate_cache()
 
     def copy(self) -> DequeDict[K, V]:
         """Return a shallow copy."""
@@ -291,6 +333,18 @@ class DequeDict(Mapping[K, V]):
             return self._dict[key].value
         self[key] = default  # type: ignore[assignment]
         return default
+
+    def at(self, index: int) -> V:
+        """Return value at index position. Supports negative indexing. O(1) amortized."""
+        cache = self._cache
+        if cache is None:
+            cache = self._build_cache()
+        logical_size = len(cache) - self._cache_offset
+        if index < 0:
+            index += logical_size
+        if index < 0 or index >= logical_size:
+            raise IndexError("index out of range")
+        return cache[self._cache_offset + index].value
 
 
 class _DequeDictKeysView(KeysView[K]):

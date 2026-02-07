@@ -693,6 +693,92 @@ class TestDequeDictRepr:
         assert "a" in result
 
 
+class TestDequeDictClassGetItem:
+    """Tests for __class_getitem__ (generic subscript support)."""
+
+    def test_class_getitem_returns_generic_alias(self):
+        # ACT
+        result = DequeDict[str, int]
+
+        # ASSERT
+        assert result is not None
+        assert hasattr(result, '__origin__')
+        assert result.__origin__ is DequeDict
+
+    def test_class_getitem_with_single_param(self):
+        # ACT
+        result = DequeDict[str]
+
+        # ASSERT
+        assert result.__origin__ is DequeDict
+
+
+class TestDequeDictAt:
+    """Tests for at() positional access."""
+
+    def test_at_returns_first_value(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT & ASSERT
+        assert dd.at(0) == 1
+
+    def test_at_returns_middle_value(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT & ASSERT
+        assert dd.at(1) == 2
+
+    def test_at_returns_last_value(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT & ASSERT
+        assert dd.at(2) == 3
+
+    def test_at_negative_index(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT & ASSERT
+        assert dd.at(-1) == 3
+        assert dd.at(-2) == 2
+        assert dd.at(-3) == 1
+
+    def test_at_raises_on_empty(self):
+        # SETUP
+        dd = DequeDict()
+
+        # ACT & ASSERT
+        with pytest.raises(IndexError, match="index out of range"):
+            dd.at(0)
+
+    def test_at_raises_on_out_of_bounds(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2)])
+
+        # ACT & ASSERT
+        with pytest.raises(IndexError, match="index out of range"):
+            dd.at(2)
+
+    def test_at_raises_on_negative_out_of_bounds(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2)])
+
+        # ACT & ASSERT
+        with pytest.raises(IndexError, match="index out of range"):
+            dd.at(-3)
+
+    def test_at_single_element(self):
+        # SETUP
+        dd = DequeDict([("only", 42)])
+
+        # ACT & ASSERT
+        assert dd.at(0) == 42
+        assert dd.at(-1) == 42
+
+
 class TestDefaultDequeDict:
     """Tests for DefaultDequeDict with default_factory."""
 

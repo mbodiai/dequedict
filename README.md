@@ -47,6 +47,7 @@ groups["a"].append(2)
 | `popleftitem()` / `popitem()` | Remove and return first/last pair |
 | `appendleft(key, value)` | Insert at front |
 | `move_to_end(key, last=True)` | Move to front or back |
+| `at(index)` | Value at position, O(1) amortized (supports negative indexing) |
 | `get`, `keys`, `values`, `items`, `clear`, `copy`, `update`, `setdefault` | Standard dict ops |
 
 ## Performance

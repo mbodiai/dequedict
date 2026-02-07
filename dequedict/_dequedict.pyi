@@ -1,4 +1,5 @@
 """Typing stubs for dequedict."""
+import types
 from typing import TypeVar, Iterator, ItemsView, KeysView, ValuesView, Callable, overload
 from collections.abc import Iterable, Mapping
 
@@ -16,6 +17,7 @@ class DequeDict(Mapping[K, V]):
     - Maintains insertion order
     """
 
+    def __class_getitem__(cls, params: object) -> types.GenericAlias: ...
     def __init__(self, items: Mapping[K, V] | Iterable[tuple[K, V]] | None = None) -> None: ...
     def __len__(self) -> int: ...
     def __contains__(self, key: object) -> bool: ...
@@ -104,6 +106,10 @@ class DequeDict(Mapping[K, V]):
 
     def update(self, other: Mapping[K, V] | Iterable[tuple[K, V]] | None = None, **kwargs: V) -> None:
         """D.update([E, ]**F)."""
+        ...
+
+    def at(self, index: int) -> V:
+        """Return value at index position. Supports negative indexing. O(1) amortized."""
         ...
 
     @overload

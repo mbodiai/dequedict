@@ -6,16 +6,18 @@
  * - O(1) pop/popitem/peek/peekitem (right side)
  * - O(1) appendleft (insert at front)
  * - O(1) lookup by key
+ * - O(1) at(index) via incremental cache (C array of entry pointers)
  * - Maintains insertion order
  *
- * Implementation: Uses a doubly-linked list of entries with a hash table for O(1) lookup.
- * Similar to Python's OrderedDict but with efficient deque operations.
+ * Cache stores entry pointers (not values). pop(key)/del maintains cache
+ * in-place via memmove + index fixup, so at() stays O(1) always.
  */
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <structmember.h>
 #include <stdint.h>
+#include <string.h>
 
 /* Entry in the deque-dict */
 typedef struct DequeDictEntry {
@@ -23,6 +25,7 @@ typedef struct DequeDictEntry {
     PyObject *value;
     struct DequeDictEntry *prev;
     struct DequeDictEntry *next;
+    Py_ssize_t cache_idx;       /* Position in index_cache */
 } DequeDictEntry;
 
 /* Freelist for entry reuse - avoid malloc/free overhead */
@@ -52,13 +55,83 @@ static inline void entry_free(DequeDictEntry *entry) {
 
 typedef struct {
     PyObject_HEAD
-    PyObject *dict;             /* Internal dict for O(1) key lookup -> entry */
-    DequeDictEntry *head;       /* First entry (for popleft) */
-    DequeDictEntry *tail;       /* Last entry (for pop) */
+    PyObject *dict;                 /* Internal dict for O(1) key lookup -> entry */
+    DequeDictEntry *head;           /* First entry (for popleft) */
+    DequeDictEntry *tail;           /* Last entry (for pop) */
     Py_ssize_t size;
+    DequeDictEntry **index_cache;   /* C array of entry pointers, or NULL */
+    Py_ssize_t cache_size;          /* Number of entries in cache */
+    Py_ssize_t cache_capacity;      /* Allocated capacity of cache */
+    Py_ssize_t cache_offset;        /* Left offset into index_cache */
 } DequeDictObject;
 
 static PyTypeObject DequeDict_Type;
+
+/* ========================================================================
+ * Cache helpers
+ * ======================================================================== */
+
+static inline void
+DequeDict_invalidate_cache(DequeDictObject *self)
+{
+    if (self->index_cache) {
+        PyMem_Free(self->index_cache);
+        self->index_cache = NULL;
+    }
+    self->cache_size = 0;
+    self->cache_capacity = 0;
+    self->cache_offset = 0;
+}
+
+static int
+DequeDict_rebuild_cache(DequeDictObject *self)
+{
+    DequeDict_invalidate_cache(self);
+    if (self->size == 0)
+        return 0;
+
+    self->cache_capacity = self->size;
+    self->index_cache = PyMem_Malloc(sizeof(DequeDictEntry *) * self->cache_capacity);
+    if (!self->index_cache) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    self->cache_size = self->size;
+    self->cache_offset = 0;
+
+    DequeDictEntry *entry = self->head;
+    Py_ssize_t i = 0;
+    while (entry) {
+        entry->cache_idx = i;
+        self->index_cache[i] = entry;
+        entry = entry->next;
+        i++;
+    }
+    return 0;
+}
+
+/* Ensure cache has room for one more entry. Returns 0 on success, -1 on failure. */
+static int
+DequeDict_cache_ensure_capacity(DequeDictObject *self)
+{
+    if (self->cache_size < self->cache_capacity)
+        return 0;
+
+    Py_ssize_t new_cap = self->cache_capacity * 2;
+    if (new_cap < 8) new_cap = 8;
+
+    DequeDictEntry **new_cache = PyMem_Realloc(self->index_cache,
+        sizeof(DequeDictEntry *) * new_cap);
+    if (!new_cache) {
+        DequeDict_invalidate_cache(self);
+        return -1;
+    }
+    self->index_cache = new_cache;
+    self->cache_capacity = new_cap;
+    return 0;
+}
+
+/* ======================================================================== */
 
 static int
 DequeDict_traverse(DequeDictObject *self, visitproc visit, void *arg)
@@ -90,6 +163,7 @@ DequeDict_clear(DequeDictObject *self)
     self->tail = NULL;
     self->size = 0;
     Py_CLEAR(self->dict);
+    DequeDict_invalidate_cache(self);
     return 0;
 }
 
@@ -123,6 +197,7 @@ DequeDict_init(DequeDictObject *self, PyObject *args, PyObject *kwds)
         entry = next;
     }
     Py_XDECREF(self->dict);
+    DequeDict_invalidate_cache(self);
 
     self->dict = PyDict_New();
     if (!self->dict) return -1;
@@ -150,6 +225,7 @@ DequeDict_init(DequeDictObject *self, PyObject *args, PyObject *kwds)
                 new_entry->value = value;
                 new_entry->prev = self->tail;
                 new_entry->next = NULL;
+                new_entry->cache_idx = -1;
 
                 if (self->tail) {
                     self->tail->next = new_entry;
@@ -204,6 +280,7 @@ DequeDict_init(DequeDictObject *self, PyObject *args, PyObject *kwds)
                 new_entry->value = value;
                 new_entry->prev = self->tail;
                 new_entry->next = NULL;
+                new_entry->cache_idx = -1;
 
                 if (self->tail) {
                     self->tail->next = new_entry;
@@ -267,7 +344,7 @@ static int
 DequeDict_setitem(DequeDictObject *self, PyObject *key, PyObject *value)
 {
     if (value == NULL) {
-        /* __delitem__ */
+        /* __delitem__ — remove from cache in-place */
         PyObject *capsule = PyDict_GetItem(self->dict, key);
         if (!capsule) {
             PyErr_SetObject(PyExc_KeyError, key);
@@ -294,12 +371,13 @@ DequeDict_setitem(DequeDictObject *self, PyObject *key, PyObject *value)
         Py_DECREF(entry->value);
         entry_free(entry);
         self->size--;
+        DequeDict_invalidate_cache(self);
         return 0;
     }
 
     PyObject *capsule = PyDict_GetItem(self->dict, key);
     if (capsule) {
-        /* Update existing entry */
+        /* Update existing entry — cache stores entry pointers, no update needed */
         DequeDictEntry *entry = (DequeDictEntry *)PyLong_AsVoidPtr(capsule);
         if (!entry) return -1;
 
@@ -323,6 +401,7 @@ DequeDict_setitem(DequeDictObject *self, PyObject *key, PyObject *value)
     new_entry->value = value;
     new_entry->prev = self->tail;
     new_entry->next = NULL;
+    new_entry->cache_idx = -1;
 
     if (self->tail) {
         self->tail->next = new_entry;
@@ -331,6 +410,15 @@ DequeDict_setitem(DequeDictObject *self, PyObject *key, PyObject *value)
     }
     self->tail = new_entry;
     self->size++;
+
+    /* Append to cache if it exists */
+    if (self->index_cache) {
+        if (DequeDict_cache_ensure_capacity(self) == 0 && self->index_cache) {
+            new_entry->cache_idx = self->cache_size;
+            self->index_cache[self->cache_size] = new_entry;
+            self->cache_size++;
+        }
+    }
 
     capsule = PyLong_FromVoidPtr(new_entry);
     if (!capsule) {
@@ -438,6 +526,11 @@ DequeDict_popleft(DequeDictObject *self, PyObject *Py_UNUSED(args))
     entry_free(entry);
     self->size--;
 
+    /* Bump cache offset instead of invalidating */
+    if (self->index_cache) {
+        self->cache_offset++;
+    }
+
     return value;
 }
 
@@ -469,6 +562,11 @@ DequeDict_popleftitem(DequeDictObject *self, PyObject *Py_UNUSED(args))
     Py_DECREF(entry->value);
     entry_free(entry);
     self->size--;
+
+    /* Bump cache offset instead of invalidating */
+    if (self->index_cache) {
+        self->cache_offset++;
+    }
 
     PyObject *result = PyTuple_Pack(2, key, value);
     Py_DECREF(key);
@@ -515,10 +613,15 @@ DequeDict_pop(DequeDictObject *self, PyObject *args)
         entry_free(entry);
         self->size--;
 
+        /* Pop from cache right side */
+        if (self->index_cache && self->cache_size > 0) {
+            self->cache_size--;
+        }
+
         return value;
     }
 
-    /* Pop by key */
+    /* Pop by key — remove from cache in-place */
     PyObject *capsule = PyDict_GetItem(self->dict, key);
     if (!capsule) {
         if (default_val) {
@@ -552,6 +655,7 @@ DequeDict_pop(DequeDictObject *self, PyObject *args)
     Py_DECREF(entry->value);
     entry_free(entry);
     self->size--;
+    DequeDict_invalidate_cache(self);
 
     return value;
 }
@@ -585,13 +689,18 @@ DequeDict_popitem(DequeDictObject *self, PyObject *Py_UNUSED(args))
     entry_free(entry);
     self->size--;
 
+    /* Pop from cache right side */
+    if (self->index_cache && self->cache_size > 0) {
+        self->cache_size--;
+    }
+
     PyObject *result = PyTuple_Pack(2, key, value);
     Py_DECREF(key);
     Py_DECREF(value);
     return result;
 }
 
-/* appendleft(key, value) - O(1) insert at front */
+/* appendleft(key, value) - O(1) insert at front — invalidates cache */
 static PyObject *
 DequeDict_appendleft(DequeDictObject *self, PyObject *args)
 {
@@ -617,6 +726,7 @@ DequeDict_appendleft(DequeDictObject *self, PyObject *args)
     new_entry->value = value;
     new_entry->prev = NULL;
     new_entry->next = self->head;
+    new_entry->cache_idx = -1;
 
     if (self->head) {
         self->head->prev = new_entry;
@@ -625,6 +735,7 @@ DequeDict_appendleft(DequeDictObject *self, PyObject *args)
     }
     self->head = new_entry;
     self->size++;
+    DequeDict_invalidate_cache(self);
 
     PyObject *capsule = PyLong_FromVoidPtr(new_entry);
     if (!capsule) {
@@ -930,6 +1041,7 @@ DequeDict_clear_method(DequeDictObject *self, PyObject *Py_UNUSED(args))
     self->head = NULL;
     self->tail = NULL;
     self->size = 0;
+    DequeDict_invalidate_cache(self);
 
     Py_RETURN_NONE;
 }
@@ -1032,7 +1144,49 @@ DequeDict_setdefault(DequeDictObject *self, PyObject *args)
     return default_val;
 }
 
-/* move_to_end(key, last=True) - O(1) move key to front or back */
+/* __class_getitem__(params) - support generic subscript syntax e.g. DequeDict[str, int] */
+static PyObject *
+DequeDict_class_getitem(PyObject *cls, PyObject *args)
+{
+    return Py_GenericAlias(cls, args);
+}
+
+/* at(index) - O(1) via entry pointer cache */
+static PyObject *
+DequeDict_at(DequeDictObject *self, PyObject *args)
+{
+    Py_ssize_t index;
+
+    if (!PyArg_ParseTuple(args, "n", &index))
+        return NULL;
+
+    /* Build cache if needed */
+    if (!self->index_cache) {
+        if (DequeDict_rebuild_cache(self) < 0)
+            return NULL;
+        if (!self->index_cache) {
+            /* Empty dict, size==0, no cache allocated */
+            PyErr_SetString(PyExc_IndexError, "index out of range");
+            return NULL;
+        }
+    }
+
+    Py_ssize_t logical_size = self->cache_size - self->cache_offset;
+
+    if (index < 0)
+        index += logical_size;
+
+    if (index < 0 || index >= logical_size) {
+        PyErr_SetString(PyExc_IndexError, "index out of range");
+        return NULL;
+    }
+
+    DequeDictEntry *entry = self->index_cache[self->cache_offset + index];
+    Py_INCREF(entry->value);
+    return entry->value;
+}
+
+/* move_to_end(key, last=True) - O(1) move key to front or back — invalidates cache */
 static PyObject *
 DequeDict_move_to_end(DequeDictObject *self, PyObject *args, PyObject *kwds)
 {
@@ -1068,6 +1222,8 @@ DequeDict_move_to_end(DequeDictObject *self, PyObject *args, PyObject *kwds)
     } else {
         self->tail = entry->prev;
     }
+
+    DequeDict_invalidate_cache(self);
 
     if (last) {
         /* Move to end */
@@ -1306,7 +1462,11 @@ static PyMethodDef DequeDict_methods[] = {
     {"copy", (PyCFunction)DequeDict_copy, METH_NOARGS, "D.copy() -> a shallow copy"},
     {"update", (PyCFunction)DequeDict_update, METH_VARARGS | METH_KEYWORDS, "D.update([E, ]**F)"},
     {"setdefault", (PyCFunction)DequeDict_setdefault, METH_VARARGS, "D.setdefault(k[,d])"},
+    {"at", (PyCFunction)DequeDict_at, METH_VARARGS,
+     "Return value at index position. O(1) via entry pointer cache."},
     {"__reversed__", (PyCFunction)DequeDict_reversed, METH_NOARGS, "D.__reversed__() -- return reverse iterator"},
+    {"__class_getitem__", (PyCFunction)DequeDict_class_getitem, METH_O | METH_CLASS,
+     "See PEP 585"},
     {NULL}
 };
 

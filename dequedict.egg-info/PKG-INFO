@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: dequedict
-Version: 0.1.0
+Version: 0.1.3
 Summary: Fast ordered dict with deque-like operations at both ends
 Author: sebastian
 License-Expression: MIT
@@ -69,6 +69,7 @@ groups["a"].append(2)
 | `popleftitem()` / `popitem()` | Remove and return first/last pair |
 | `appendleft(key, value)` | Insert at front |
 | `move_to_end(key, last=True)` | Move to front or back |
+| `at(index)` | Value at position, O(1) amortized (supports negative indexing) |
 | `get`, `keys`, `values`, `items`, `clear`, `copy`, `update`, `setdefault` | Standard dict ops |
 
 ## Performance
