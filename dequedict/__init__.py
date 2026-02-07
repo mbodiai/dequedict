@@ -359,6 +359,9 @@ class _DequeDictKeysView(KeysView[K]):
     def __iter__(self) -> Iterator[K]:
         return iter(self._dd)
 
+    def __reversed__(self) -> Iterator[K]:
+        return reversed(self._dd)
+
     def __contains__(self, key: object) -> bool:
         return key in self._dd
 
@@ -376,6 +379,12 @@ class _DequeDictValuesView(ValuesView[V]):
         for node in self._dd._iter_nodes():
             yield node.value
 
+    def __reversed__(self) -> Iterator[V]:
+        node = self._dd._tail
+        while node:
+            yield node.value
+            node = node.prev
+
     def __contains__(self, value: object) -> bool:
         return any(node.value == value for node in self._dd._iter_nodes())
 
@@ -392,6 +401,12 @@ class _DequeDictItemsView(ItemsView[K, V]):
     def __iter__(self) -> Iterator[tuple[K, V]]:
         for node in self._dd._iter_nodes():
             yield (node.key, node.value)
+
+    def __reversed__(self) -> Iterator[tuple[K, V]]:
+        node = self._dd._tail
+        while node:
+            yield (node.key, node.value)
+            node = node.prev
 
     def __contains__(self, item: object) -> bool:
         if not isinstance(item, tuple) or len(item) != 2:

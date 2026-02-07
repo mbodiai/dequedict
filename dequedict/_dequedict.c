@@ -826,6 +826,7 @@ typedef struct {
     DequeDictObject *dd;
     DequeDictEntry *current;
     int kind;
+    int reverse;  /* 0=forward (->next), 1=reverse (->prev) */
 } DequeDictViewIterObject;
 
 static PyTypeObject DequeDictViewIter_Type;
@@ -868,7 +869,7 @@ DequeDictViewIter_next(DequeDictViewIterObject *it)
         result = PyTuple_Pack(2, it->current->key, it->current->value);
     }
 
-    it->current = it->current->next;
+    it->current = it->reverse ? it->current->prev : it->current->next;
     return result;
 }
 
@@ -882,6 +883,22 @@ DequeDictView_iter(DequeDictViewObject *self)
     it->dd = self->dd;
     it->current = self->dd->head;
     it->kind = self->kind;
+    it->reverse = 0;
+    PyObject_GC_Track(it);
+    return (PyObject *)it;
+}
+
+static PyObject *
+DequeDictView_reversed(DequeDictViewObject *self)
+{
+    DequeDictViewIterObject *it = PyObject_GC_New(DequeDictViewIterObject, &DequeDictViewIter_Type);
+    if (!it) return NULL;
+
+    Py_INCREF(self->dd);
+    it->dd = self->dd;
+    it->current = self->dd->tail;
+    it->kind = self->kind;
+    it->reverse = 1;
     PyObject_GC_Track(it);
     return (PyObject *)it;
 }
@@ -937,6 +954,21 @@ static PySequenceMethods DequeDictItemsView_as_seq = {
     .sq_contains = (objobjproc)DequeDictItemsView_contains,
 };
 
+static PyMethodDef DequeDictKeysView_methods[] = {
+    {"__reversed__", (PyCFunction)DequeDictView_reversed, METH_NOARGS, NULL},
+    {NULL}
+};
+
+static PyMethodDef DequeDictValuesView_methods[] = {
+    {"__reversed__", (PyCFunction)DequeDictView_reversed, METH_NOARGS, NULL},
+    {NULL}
+};
+
+static PyMethodDef DequeDictItemsView_methods[] = {
+    {"__reversed__", (PyCFunction)DequeDictView_reversed, METH_NOARGS, NULL},
+    {NULL}
+};
+
 static PyTypeObject DequeDictViewIter_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "dequedict.DequeDictViewIter",
@@ -959,6 +991,7 @@ static PyTypeObject DequeDictKeysView_Type = {
     .tp_traverse = (traverseproc)DequeDictView_traverse,
     .tp_clear = (inquiry)DequeDictView_clear,
     .tp_iter = (getiterfunc)DequeDictView_iter,
+    .tp_methods = DequeDictKeysView_methods,
 };
 
 static PyTypeObject DequeDictValuesView_Type = {
@@ -971,6 +1004,7 @@ static PyTypeObject DequeDictValuesView_Type = {
     .tp_traverse = (traverseproc)DequeDictView_traverse,
     .tp_clear = (inquiry)DequeDictView_clear,
     .tp_iter = (getiterfunc)DequeDictView_iter,
+    .tp_methods = DequeDictValuesView_methods,
 };
 
 static PyTypeObject DequeDictItemsView_Type = {
@@ -983,6 +1017,7 @@ static PyTypeObject DequeDictItemsView_Type = {
     .tp_traverse = (traverseproc)DequeDictView_traverse,
     .tp_clear = (inquiry)DequeDictView_clear,
     .tp_iter = (getiterfunc)DequeDictView_iter,
+    .tp_methods = DequeDictItemsView_methods,
 };
 
 /* keys() - O(1) returns view */

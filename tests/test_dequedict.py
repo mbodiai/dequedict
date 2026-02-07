@@ -497,6 +497,54 @@ class TestDequeDictViews:
         assert ("a", 1) in dd.items()
         assert ("a", 99) not in dd.items()
 
+    def test_reversed_keys_view(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT
+        result = list(reversed(dd.keys()))
+
+        # ASSERT
+        assert result == ["c", "b", "a"]
+
+    def test_reversed_values_view(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT
+        result = list(reversed(dd.values()))
+
+        # ASSERT
+        assert result == [3, 2, 1]
+
+    def test_reversed_items_view(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT
+        result = list(reversed(dd.items()))
+
+        # ASSERT
+        assert result == [("c", 3), ("b", 2), ("a", 1)]
+
+    def test_reversed_views_empty(self):
+        # SETUP
+        dd = DequeDict()
+
+        # ACT & ASSERT
+        assert list(reversed(dd.keys())) == []
+        assert list(reversed(dd.values())) == []
+        assert list(reversed(dd.items())) == []
+
+    def test_reversed_views_next(self):
+        # SETUP
+        dd = DequeDict([("a", 1), ("b", 2), ("c", 3)])
+
+        # ACT & ASSERT — O(1) single element access
+        assert next(reversed(dd.keys())) == "c"
+        assert next(reversed(dd.values())) == 3
+        assert next(reversed(dd.items())) == ("c", 3)
+
 
 class TestDequeDictIteration:
     """Tests for iteration."""

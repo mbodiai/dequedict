@@ -6,6 +6,16 @@ from collections.abc import Iterable, Mapping
 K = TypeVar("K")
 V = TypeVar("V")
 
+class _DequeDictKeysView(KeysView[K]):
+    def __reversed__(self) -> Iterator[K]: ...
+
+class _DequeDictValuesView(ValuesView[V]):
+    def __reversed__(self) -> Iterator[V]: ...
+
+class _DequeDictItemsView(ItemsView[K, V]):
+    def __reversed__(self) -> Iterator[tuple[K, V]]: ...
+
+
 class DequeDict(Mapping[K, V]):
     """Ordered dictionary with O(1) deque operations at both ends.
 
@@ -84,15 +94,15 @@ class DequeDict(Mapping[K, V]):
     @overload
     def get(self, key: K, default: V) -> V: ...
 
-    def keys(self) -> KeysView[K]:
+    def keys(self) -> _DequeDictKeysView[K]:
         """D.keys() -> view of keys in order."""
         ...
 
-    def values(self) -> ValuesView[V]:
+    def values(self) -> _DequeDictValuesView[V]:
         """D.values() -> view of values in order."""
         ...
 
-    def items(self) -> ItemsView[K, V]:
+    def items(self) -> _DequeDictItemsView[K, V]:
         """D.items() -> view of (key, value) in order."""
         ...
 
@@ -131,4 +141,3 @@ class DefaultDequeDict(DequeDict[K, V]):
 
     def __missing__(self, key: K) -> V: ...
     def copy(self) -> DefaultDequeDict[K, V]: ...
-
