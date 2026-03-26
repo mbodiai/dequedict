@@ -11,7 +11,7 @@ version = "0.1.4"
 description = "Fast ordered dict with deque-like operations at both ends"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = {text = "MIT"}
 authors = [{name = "sebastian"}]
 classifiers = [
     "Development Status :: 4 - Beta",
